@@ -6,6 +6,9 @@ from __future__ import print_function
 
 import tensorflow as tf
 from tensorflow.python.framework import graph_util
+from tensorflow.tools.quantization.quantize_graph import GraphRewriter
+
+tf.logging.set_verbosity(tf.logging.DEBUG)
 
 import os
 import sys
@@ -44,13 +47,14 @@ def train_eval(
     print('\tNum examples: %10d  Num correct: %10d  Precision @ 1: %0.04f' %
             (num_examples, true_count, precision))
 
-def train(model, log_dir, output_graph_name='frozen.pb'):
+def train(model, log_dir, frozen_graph_name):
+    """ Train the model and gives a frozen graph output """
+
     (train_data, test_data, validation_data) = model.load_dataset()
     (predictions, loss, train_op, eval_op) = model.build()
 
     if tf.gfile.Exists(log_dir):
         tf.gfile.DeleteRecursively(log_dir)
-
     tf.gfile.MakeDirs(log_dir)
 
     with model.graph.as_default():
@@ -61,6 +65,9 @@ def train(model, log_dir, output_graph_name='frozen.pb'):
 
         with tf.Session() as sess:
             sess.run(init_op)
+
+            tf.train.write_graph(sess.graph_def, log_dir, 'graph.pb', as_text=False)
+
             for i in range(FLAGS.max_steps):
                 start_time = time.time()
 
@@ -90,19 +97,26 @@ def train(model, log_dir, output_graph_name='frozen.pb'):
                     train_eval(sess, eval_op, model.input_placeholder, model.label_placeholder,test_data)
                     train_eval(sess, eval_op, model.input_placeholder, model.label_placeholder,validation_data)
 
+            with tf.gfile.GFile(os.path.join(log_dir, 'saver.pb'), 'wb') as f:
+                f.write(saver.to_proto().SerializeToString())
+
             output_graph_def = graph_util.convert_variables_to_constants(
                 sess,
                 model.graph.as_graph_def(),
                 [eval_op.name.split(':')[0]])
 
-            with tf.gfile.GFile(output_graph_name, 'wb') as f:
+            with tf.gfile.GFile(frozen_graph_name, 'wb') as f:
                 f.write(output_graph_def.SerializeToString())
             
-def eval_model(model, frozen_graph_name):
+def eval_model(model, graph_name):
+    """
+    Evaluate the model based on a given graph
+    """
+
     (_, test_data, _) = model.load_dataset()
     (_, _, _, eval_op) = model.build()
 
-    with tf.gfile.GFile(frozen_graph_name, 'rb') as f:
+    with tf.gfile.GFile(graph_name, 'rb') as f:
         graph_def = tf.GraphDef()
         graph_def.ParseFromString(f.read())
 
@@ -121,6 +135,7 @@ def eval_model(model, frozen_graph_name):
                 label_placeholder,
                 test_data)
 
+def quantize(frozen_graph_name, quantized_graph_name):
 
 def main(_):
     if not FLAGS.model_name:
@@ -137,7 +152,7 @@ def main(_):
     if FLAGS.training:
         train(model, log_dir=FLAGS.log_dir, output_graph_name=FLAGS.output_graph_name)
     else:
-        eval_model(model, frozen_graph_name=FLAGS.output_graph_name)
+        eval_model(model, frozen_graph_name=frozen_graph_name)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -148,7 +163,13 @@ def parse_args():
         help='The name of the target model')
 
     parser.add_argument(
-        '--output-graph-name',
+        '--quantized-graph-name',
+        type=str,
+        default='',
+        help='The quantized graph of the target model')
+
+    parser.add_argument(
+        '--frozen-graph-name',
         type=str,
         default='',
         help='The name of frozen output graph')
@@ -181,5 +202,6 @@ def parse_args():
     
 
 if __name__ == '__main__':
+    print(tf.__version__)
     FLAGS, _ = parse_args()
     tf.app.run()
