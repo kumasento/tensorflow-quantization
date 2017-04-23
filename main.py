@@ -6,7 +6,7 @@ from __future__ import print_function
 
 import tensorflow as tf
 from tensorflow.python.framework import graph_util
-from tensorflow.tools.quantization.quantize_graph import GraphRewriter
+from tensorflow.python.framework import importer
 
 tf.logging.set_verbosity(tf.logging.DEBUG)
 
@@ -16,6 +16,7 @@ import time
 import argparse
 
 import models
+import utils
 
 FLAGS=None
 
@@ -33,6 +34,8 @@ def train_eval(
     true_count = 0
     steps_per_epoch = dataset.num_examples // FLAGS.batch_size
     num_examples = steps_per_epoch * FLAGS.batch_size
+
+    start_time = time.time()
     for step in range(steps_per_epoch):
         image_feed, label_feed = dataset.next_batch(FLAGS.batch_size)
 
@@ -42,10 +45,11 @@ def train_eval(
         }
         
         true_count += sess.run(eval_correct, feed_dict=feed_dict)
+    duration = time.time() - start_time
 
     precision = float(true_count) / num_examples
-    print('\tNum examples: %10d  Num correct: %10d  Precision @ 1: %0.04f' %
-            (num_examples, true_count, precision))
+    print('\tNum examples: %6d  Num correct: %6d  Precision: %0.04f duration: %.2f sec' %
+            (num_examples, true_count, precision, duration))
 
 def train(model, log_dir, frozen_graph_name):
     """ Train the model and gives a frozen graph output """
@@ -114,11 +118,13 @@ def eval_model(model, graph_name):
     """
 
     (_, test_data, _) = model.load_dataset()
-    (_, _, _, eval_op) = model.build()
+    eval_op = model.eval_op
 
     with tf.gfile.GFile(graph_name, 'rb') as f:
         graph_def = tf.GraphDef()
         graph_def.ParseFromString(f.read())
+        for node in graph_def.node[:2]:
+            print(node)
 
     with tf.Graph().as_default() as graph:
         tf.import_graph_def(graph_def)
@@ -135,7 +141,22 @@ def eval_model(model, graph_name):
                 label_placeholder,
                 test_data)
 
-def quantize(frozen_graph_name, quantized_graph_name):
+def quantize(model, frozen_graph_name, quantized_graph_name):
+    eval_op = model.eval_op
+
+    tf_graph = tf.GraphDef()
+    with tf.gfile.GFile(frozen_graph_name, 'rb') as f:
+        tf_graph.ParseFromString(f.read())
+
+    graph = tf.Graph()
+    with graph.as_default():
+        importer.import_graph_def(tf_graph, input_map={}, name='')
+
+    rewriter = utils.GraphRewriter(tf_graph, 'eightbit', None)
+    output_graph = rewriter.rewrite([eval_op.name.split(':')[0]])
+
+    with tf.gfile.GFile(quantized_graph_name, 'wb') as f:
+        f.write(output_graph.SerializeToString())
 
 def main(_):
     if not FLAGS.model_name:
@@ -150,9 +171,12 @@ def main(_):
     model = MODEL_CLASSES[FLAGS.model_name](graph=graph)
 
     if FLAGS.training:
-        train(model, log_dir=FLAGS.log_dir, output_graph_name=FLAGS.output_graph_name)
+        train(model, log_dir=FLAGS.log_dir, frozen_graph_name=FLAGS.frozen_graph_name)
+        quantize(model, FLAGS.frozen_graph_name, FLAGS.quantized_graph_name)
     else:
-        eval_model(model, frozen_graph_name=frozen_graph_name)
+        model.build()
+        eval_model(model, graph_name=FLAGS.frozen_graph_name)
+        eval_model(model, graph_name=FLAGS.quantized_graph_name)
 
 def parse_args():
     parser = argparse.ArgumentParser()

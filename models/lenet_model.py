@@ -119,7 +119,7 @@ class LeNetModel(object):
                     loss=loss,
                     global_step=tf.contrib.framework.get_global_step(),
                     learning_rate=0.001,
-                    optimizer='SGD')
+                    optimizer='Adam')
 
             predictions = {
                 "classes": tf.argmax(input=fc2, axis=1),
@@ -128,6 +128,7 @@ class LeNetModel(object):
                     name="softmax_tensor")
             }
 
+        self.eval_op = eval_op
 
         return (predictions, loss, train_op, eval_op)
 
