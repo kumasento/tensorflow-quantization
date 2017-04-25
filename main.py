@@ -123,15 +123,13 @@ def eval_model(model, graph_name):
     with tf.gfile.GFile(graph_name, 'rb') as f:
         graph_def = tf.GraphDef()
         graph_def.ParseFromString(f.read())
-        for node in graph_def.node[:2]:
-            print(node)
 
     with tf.Graph().as_default() as graph:
-        tf.import_graph_def(graph_def)
+        tf.import_graph_def(graph_def, input_map={}, name='')
 
-        input_placeholder = graph.get_tensor_by_name('import/' + model.input_placeholder.name)
-        label_placeholder = graph.get_tensor_by_name('import/' + model.label_placeholder.name)
-        imported_eval_op = graph.get_tensor_by_name('import/' + eval_op.name)
+        input_placeholder = graph.get_tensor_by_name(model.input_placeholder.name)
+        label_placeholder = graph.get_tensor_by_name(model.label_placeholder.name)
+        imported_eval_op = graph.get_tensor_by_name(eval_op.name)
 
         with tf.Session() as sess:
             train_eval(
