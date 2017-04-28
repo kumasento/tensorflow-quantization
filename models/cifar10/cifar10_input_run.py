@@ -21,9 +21,19 @@ def main(_):
     print(labels)
 
     with tf.Session() as sess:
-        res = sess.run([images, labels])
-        print(res)
-    pass
+        sess.run(tf.global_variables_initializer())
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord)
+
+        for i in range(10):
+            batched_images = sess.run(images)
+            batched_labels = sess.run(labels)
+            print(batched_images.shape)
+            print(batched_labelsimages.shape)
+
+        coord.request_stop()
+        coord.join(threads)
+        sess.close()
 
 if __name__ == '__main__':
     tf.app.run()
